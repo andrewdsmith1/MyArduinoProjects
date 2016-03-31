@@ -1,19 +1,9 @@
+#include <EEPROM.h>
 #include <RBD_Timer.h>
-
 #include <RBD_Button.h>
-
 #include "FastLED.h"
 
 FASTLED_USING_NAMESPACE
-
-// FastLED "100-lines-of-code" demo reel, showing just a few 
-// of the kinds of animation patterns you can quickly and easily 
-// compose using FastLED.  
-//
-// This example also shows one easy way to define multiple 
-// animations patterns and have them automatically rotate.
-//
-// -Mark Kriegsman, December 2014
 
 #if FASTLED_VERSION < 3001000
 #error "Requires FastLED 3.1 or later; check github for latest code."
@@ -26,7 +16,7 @@ FASTLED_USING_NAMESPACE
 #define NUM_LEDS    50
 CRGB leds[NUM_LEDS];
 
-// shoulder strip
+// shoulder strip - on pins 7 and 8
 #define DATA_PIN  8
 #define CLK_PIN   7
 #define NUM_LEDS_2    10
@@ -44,14 +34,15 @@ fract8 glitterChance = 0;
 RBD::Button button(9);
 
 
+
+
 void setup() {
   // initialize serial communication at 9600 bits per second:
-  Serial.begin(9600);
+  // Serial.begin(9600);
 
-  
+  initializeModeAndPattern();
+
   // tell FastLED about the LED strip configuration
-  //FastLED.addLeds<LED_TYPE,DATA_PIN,COLOR_ORDER>(leds, NUM_LEDS).setCorrection(TypicalLEDStrip);
-  //FastLED.addLeds<LED_TYPE,DATA_PIN,CLK_PIN,COLOR_ORDER>(leds, NUM_LEDS).setCorrection(TypicalLEDStrip);
   FastLED.addLeds<LED_TYPE,COLOR_ORDER>(leds, NUM_LEDS).setCorrection(TypicalLEDStrip);
   FastLED.addLeds<LED_TYPE,DATA_PIN,CLK_PIN,COLOR_ORDER>(leds2, NUM_LEDS_2).setCorrection(TypicalLEDStrip);
 
@@ -65,17 +56,20 @@ void setup() {
   delay(3000); // 3 second delay for recovery
 }
 
-
 // List of patterns to cycle through.  Each is defined as a separate function below.
 typedef void (*SimplePatternList[])();
-SimplePatternList gPatterns = { rainbow, rainbowWithGlitter, confetti, sinelon, juggle, bpm, Fire2012, allWhite, allWhiteTemperatureCycle };
+SimplePatternList gPatterns = { rainbow, rainbowWithGlitter, oneColor, oneColorSlow, confetti, sinelon, juggle, bpm, Fire2012, allWhite /*, allWhiteTemperatureCycle*/ };
 #define ARRAY_SIZE(A) (sizeof(A) / sizeof((A)[0]))
 
 #define NUM_PATTERNS ARRAY_SIZE(gPatterns)
 
 uint8_t gCurrentPatternNumber = 0; // Index number of which pattern is current
-uint8_t gMode = NUM_PATTERNS; // either a specific pattern, or when equal to NUM_PATTERNS, rotating mode
 uint8_t gHue = 0; // rotating "base color" used by many of the patterns
+uint8_t gSlowHue = 0; // rotating "base color" used by many of the patterns
+
+
+#define MODE_EEPROM_ADDRESS 0
+uint8_t gMode; // either a specific pattern, or when equal to NUM_PATTERNS, rotating mode
   
 void loop()
 {
@@ -99,11 +93,30 @@ void loop()
     gHue++;   // slowly cycle the "base color" through the rainbow
     readAccelerometer();
   } 
+
+  EVERY_N_MILLISECONDS( 200 ) { 
+    gSlowHue++;   // slowly cycle the "base color" through the rainbow
+  } 
+    
+  EVERY_N_SECONDS( 10 ) { 
+    nextPattern(); 
+  } // change patterns periodically
+
+  FastLED.delay(1);
+  //FastLED.delay(1000/(FRAMES_PER_SECOND*3));  
+}
+
+
+void initializeModeAndPattern() {
+  gMode = EEPROM.get(MODE_EEPROM_ADDRESS, gMode);
   
-  EVERY_N_SECONDS( 10 ) { nextPattern(); } // change patterns periodically
-
-
-  FastLED.delay(1000/(FRAMES_PER_SECOND*3));  
+  if(gMode > NUM_PATTERNS) {
+    gMode = NUM_PATTERNS;
+  }
+  
+  if(gMode != NUM_PATTERNS) {
+    gCurrentPatternNumber = gMode;
+  }
 }
 
 void nextPatternMode() {
@@ -113,6 +126,8 @@ void nextPatternMode() {
   else {
     gMode ++;
   }
+
+  EEPROM.put(MODE_EEPROM_ADDRESS, gMode);
 }
 
 void readAccelerometer() {
@@ -156,13 +171,11 @@ void readAccelerometer() {
   Serial.print(delta);
   Serial.println();
   */
-
-  
+ 
 }
 
 
-void nextPattern()
-{
+void nextPattern() {
   if(gMode == NUM_PATTERNS) {
     // add one to the current pattern number, and wrap around at the end
     gCurrentPatternNumber = (gCurrentPatternNumber + 1) % NUM_PATTERNS;
@@ -174,22 +187,19 @@ void nextPattern()
   FastLED.setTemperature(UncorrectedTemperature);  
 }
 
-void rainbow() 
-{
+void rainbow() {
   // FastLED's built-in rainbow generator
   fill_rainbow( leds, NUM_LEDS, gHue, 7);
   fill_rainbow( leds2, NUM_LEDS_2, gHue, 7);
 }
 
-void rainbowWithGlitter() 
-{
+void rainbowWithGlitter() {
   // built-in FastLED rainbow, plus some random sparkly glitter
   rainbow();
   addGlitter(80);
 }
 
-void addGlitter( fract8 chanceOfGlitter) 
-{
+void addGlitter( fract8 chanceOfGlitter) {
   if( random8() < chanceOfGlitter) {
     leds[ random16(NUM_LEDS) ] += CRGB::White;
   }
@@ -199,8 +209,18 @@ void addGlitter( fract8 chanceOfGlitter)
   }
 }
 
-void confetti() 
-{
+void oneColor() {
+  fill_solid(leds, NUM_LEDS, CHSV(gHue, 255, 255));
+  fill_solid(leds2, NUM_LEDS_2, CHSV(gHue, 255, 255));
+}
+
+void oneColorSlow() {
+  fill_solid(leds, NUM_LEDS, CHSV(gSlowHue, 255, 255));
+  fill_solid(leds2, NUM_LEDS_2, CHSV(gSlowHue, 255, 255));
+}
+
+
+void confetti() {
   // random colored speckles that blink in and fade smoothly
   fadeToBlackBy( leds, NUM_LEDS, 10);
   int pos = random16(NUM_LEDS);
@@ -212,8 +232,7 @@ void confetti()
   
 }
 
-void sinelon()
-{
+void sinelon() {
   // a colored dot sweeping back and forth, with fading trails
   fadeToBlackBy( leds, NUM_LEDS, 20);
   int pos = beatsin16(13,0,NUM_LEDS);
@@ -224,8 +243,7 @@ void sinelon()
   leds2[pos] += CHSV( gHue, 255, 192);
 }
 
-void bpm()
-{
+void bpm() {
   // colored stripes pulsing at a defined Beats-Per-Minute (BPM)
   uint8_t BeatsPerMinute = 62;
   CRGBPalette16 palette = PartyColors_p;
@@ -269,6 +287,7 @@ void allWhite() {
   }
   
 }
+
 
 
 ColorTemperature temperatures[] {Candle, Tungsten40W, Tungsten100W, Halogen, CarbonArc, HighNoonSun, DirectSunlight, OvercastSky, ClearBlueSky, UncorrectedTemperature };
@@ -329,9 +348,8 @@ void allWhiteTemperatureCycle() {
 
 bool gReverseDirection = false;
 
-void Fire2012()
-{
-// Array of temperature readings at each simulation cell
+void Fire2012() {
+  // Array of temperature readings at each simulation cell
   static byte heat[NUM_LEDS];
 
   // Step 1.  Cool down every cell a little
@@ -364,9 +382,7 @@ void Fire2012()
 
     // ADS: Copy color to the other LEDs array
     CRGB colorCopy = leds[NUM_LEDS/2];
-    for( int m = 0; m < NUM_LEDS_2; m++) {
-      leds2[m] = colorCopy;
-    }
+    fill_solid(leds2, NUM_LEDS_2, colorCopy);
 }
 
 
